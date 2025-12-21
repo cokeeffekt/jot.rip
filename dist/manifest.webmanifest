@@ -1,0 +1,27 @@
+{
+  "name": "Jotrip",
+  "short_name": "Jotrip",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1021",
+  "theme_color": "#1f2f6a",
+  "description": "An offline-first notebook for travel and daily logs.",
+  "icons": [
+    {
+      "src": "/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/maskable-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

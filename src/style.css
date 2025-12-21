@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: #e5e7eb;
+  background-color: #0b1021;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --editor-font: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, 'Menlo', 'Consolas', monospace;
+  --editor-line-height: 1.6;
+}
+
+html,
+body {
+  height: var(--app-height, 100%);
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html {
+  color-scheme: dark;
+}
+
+html.theme-light {
+  color-scheme: light;
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.theme-light img,
+html.theme-light video,
+html.theme-light canvas,
+html.theme-light svg {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+#app {
+  height: var(--app-height, 100%);
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at 10% 20%, #1c2541 0, transparent 35%),
+    radial-gradient(circle at 90% 10%, #2d4263 0, transparent 28%),
+    radial-gradient(circle at 15% 80%, #1b3b58 0, transparent 25%),
+    #0b1021;
+}
+
+@media (pointer: coarse) {
+  body {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+}
+
+.editor-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  font-family: var(--editor-font);
+  font-size: 14px;
+  line-height: var(--editor-line-height);
+  outline: none;
+  resize: none;
+  caret-color: #a5b4fc;
+  white-space: pre-wrap;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+
+.editor-textarea:focus {
+  border-color: rgba(129, 140, 248, 0.7);
+  box-shadow: 0 10px 40px -24px rgba(99, 102, 241, 0.7);
+}
+
+.gutter-container {
+  position: relative;
+  height: 100%;
+}
+
+.caret-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* Scrollbars (theme) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) rgba(15, 23, 42, 0.35);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.35);
+  border: 2px solid rgba(15, 23, 42, 0.35);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.55);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-strip {
+  position: relative;
+  overflow-y: visible;
+}
+
+/* Jots list color strip */
+.note-card {
+  position: relative;
+}
+
+.note-card.has-note-color::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 6px;
+  background: var(--note-color);
+  left: -8px; /* mobile gutter (px-2) */
+}
+
+@media (min-width: 640px) {
+  .note-card.has-note-color::before {
+    left: 0;
+  }
+}
