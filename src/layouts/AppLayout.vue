@@ -93,7 +93,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="h-full overflow-hidden bg-[#060913] text-slate-100">
-    <div class="mx-auto flex h-full max-w-6xl flex-col px-0 py-2 sm:px-6 sm:py-8">
+    <div class="mx-auto flex h-full max-w-6xl flex-col px-0 py-2 sm:px-6 sm:py-8" style="padding-bottom: 0;">
       <header
         class="flex shrink-0 items-center justify-between border-b border-white/10 bg-gradient-to-b from-slate-950/80 to-slate-950/40 px-2 py-1 backdrop-blur sm:px-0"
       >

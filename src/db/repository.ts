@@ -8,6 +8,29 @@ export const makeId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2)
+const makeShortId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14)
+
+const generateNoteId = async () => {
+  for (let i = 0; i < 5; i++) {
+    const candidate = makeShortId()
+    const existing = await db.notes.get(candidate)
+    if (!existing) return candidate
+  }
+  // Fallback to full UUID if we somehow collide repeatedly
+  return makeId()
+}
+
+const generateTabId = async () => {
+  for (let i = 0; i < 5; i++) {
+    const candidate = makeShortId()
+    const existing = await db.tabs.get(candidate)
+    if (!existing) return candidate
+  }
+  return makeId()
+}
 
 type CreateNoteInput = {
   title: string
@@ -17,8 +40,9 @@ type CreateNoteInput = {
 }
 
 export async function createNote(input: CreateNoteInput): Promise<Note> {
+  const id = await generateNoteId()
   const note: Note = {
-    id: makeId(),
+    id,
     title: input.title,
     collectionIds: input.collectionIds ?? [],
     tabOrder: input.tabOrder ?? [],
@@ -74,8 +98,9 @@ export async function listArchivedNotes() {
 type CreateTabInput = { noteId: string; name: string; content: string }
 
 export async function createTab(input: CreateTabInput): Promise<Tab> {
+  const id = await generateTabId()
   const tab: Tab = {
-    id: makeId(),
+    id,
     noteId: input.noteId,
     name: input.name,
     content: input.content,

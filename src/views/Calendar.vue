@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { buildCalendarEntriesForRange } from '../calendar/entryCache'
 import type { CalendarEntry } from '../calendar/types'
@@ -15,6 +15,9 @@ const selectedDate = ref<string | null>(null)
 const loading = ref(true)
 const isMobile = ref(false)
 const dayOverlay = ref<{ date: string; entries: CalendarEntry[] } | null>(null)
+const hiddenNoteIds = ref<Set<string>>(new Set())
+const notesWithEvents = ref<Set<string>>(new Set())
+const hiddenRestored = ref(false)
 
 const pad = (n: number) => n.toString().padStart(2, '0')
 const formatDate = (y: number, mIndex: number, d: number) => `${y}-${pad(mIndex + 1)}-${pad(d)}`
@@ -69,9 +72,15 @@ const selectTodayIfEmpty = () => {
 const loadEntries = async () => {
   loading.value = true
   const [notes, tabs] = await Promise.all([listActiveNotes(), listAllTabs()])
+  const activeNoteIds = new Set(notes.map((n) => n.id))
   allNotes.value = notes
-  allTabs.value = tabs
+  allTabs.value = tabs.filter((t) => activeNoteIds.has(t.noteId))
   rebuildEntries()
+  if (!hiddenRestored.value) {
+    restoreHiddenNotes()
+    hiddenRestored.value = true
+    rebuildEntries()
+  }
   loading.value = false
   selectTodayIfEmpty()
 }
@@ -81,7 +90,9 @@ const rebuildEntries = () => {
   const start = calendarSlots.value[0]?.date
   const end = calendarSlots.value[calendarSlots.value.length - 1]?.date
   if (!start || !end) return
-  entries.value = buildCalendarEntriesForRange(allNotes.value, allTabs.value, { start, end })
+  const fullEntries = buildCalendarEntriesForRange(allNotes.value, allTabs.value, { start, end })
+  notesWithEvents.value = new Set(fullEntries.map((e) => e.noteId))
+  entries.value = fullEntries.filter((e) => !hiddenNoteIds.value.has(e.noteId))
 }
 
 const changeMonth = (delta: number) => {
@@ -120,6 +131,74 @@ const entryColor = (entry: CalendarEntry) => entry.noteColor ?? null
 
 const maxTileEntries = computed(() => (isMobile.value ? 3 : 6))
 
+const toggleNoteFilter = (noteId: string) => {
+  const next = new Set(hiddenNoteIds.value)
+  if (next.has(noteId)) next.delete(noteId)
+  else next.add(noteId)
+  hiddenNoteIds.value = next
+  rebuildEntries()
+}
+
+const isNoteVisible = (noteId: string) => !hiddenNoteIds.value.has(noteId)
+const notesForFilter = computed(() => allNotes.value.filter((n) => notesWithEvents.value.has(n.id)))
+const allNotesHidden = computed(
+  () => notesForFilter.value.length > 0 && hiddenNoteIds.value.size >= notesForFilter.value.length
+)
+
+const noteChipStyle = (note: { color?: string | null }, visible: boolean) => {
+  const color = note.color ?? null
+  if (visible) {
+    return {
+      border: color ? `1px solid ${color}` : '1px solid rgba(52,211,153,0.4)',
+      backgroundColor: color ? `${color}25` : 'rgba(52,211,153,0.12)',
+      color: color ? '#fff' : 'rgb(52,211,153)',
+    }
+  }
+  return {
+    border: color ? `1px solid ${color}55` : '1px solid rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    color: '#ffffff99',
+  }
+}
+
+const toggleAllNotes = () => {
+  if (!notesForFilter.value.length) return
+  if (hiddenNoteIds.value.size === 0) {
+    hiddenNoteIds.value = new Set(notesForFilter.value.map((n) => n.id))
+  } else {
+    hiddenNoteIds.value = new Set()
+  }
+  rebuildEntries()
+}
+
+const STORAGE_KEY = 'jotrip:calendar:hiddenNotes'
+
+const restoreHiddenNotes = () => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return
+    const allowed = new Set(notesForFilter.value.map((n) => n.id))
+    const next = parsed.filter((id) => allowed.has(id))
+    hiddenNoteIds.value = new Set(next)
+  } catch {
+    // ignore
+  }
+}
+
+watch(
+  () => hiddenNoteIds.value,
+  (set) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(set)))
+    } catch {
+      // ignore
+    }
+  },
+  { deep: true }
+)
+
 
 onMounted(loadEntries)
 
@@ -157,6 +236,27 @@ onBeforeUnmount(() => {
           @click="changeMonth(1)"
         >
           →
+        </button>
+      </div>
+
+      <div class="mt-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 text-xs text-white no-scrollbar">
+        <button
+          type="button"
+          class="shrink-0 rounded border px-3 py-2"
+          :class="hiddenNoteIds.size === 0 ? 'border-indigo-300/50 bg-indigo-500/20' : 'border-white/20 bg-white/10'"
+          @click="toggleAllNotes"
+        >
+          {{ allNotesHidden ? '-' : '*' }}
+        </button>
+        <button
+          v-for="note in notesForFilter"
+          :key="note.id"
+          type="button"
+          class="flex shrink-0 items-center gap-2 rounded px-3 py-2 border"
+          :style="noteChipStyle(note, isNoteVisible(note.id))"
+          @click="toggleNoteFilter(note.id)"
+        >
+          <span class="truncate max-w-[160px]">{{ note.title || 'Untitled' }}</span>
         </button>
       </div>
 

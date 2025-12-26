@@ -14,7 +14,7 @@ const lineCounts = ref<Record<string, number>>({})
 const tabCounts = ref<Record<string, number>>({})
 const byteSizes = ref<Record<string, number>>({})
 const checklistStats = ref<Record<string, { total: number; checked: number }>>({})
-const firstTabTags = ref<Record<string, { tag: string; lineIndex: number; priority?: boolean }[]>>({})
+const firstTabTags = ref<Record<string, { tag: string; lineIndex: number; tabId: string; priority?: boolean }[]>>({})
 const activeMenuNoteId = ref<string | null>(null)
 
 const countLines = (text: string) => text.replace(/\r\n/g, '\n').split('\n').length
@@ -66,7 +66,7 @@ const computeCounts = (
   const nextTabCounts: Record<string, number> = {}
   const nextByteSizes: Record<string, number> = {}
   const nextChecklist: Record<string, { total: number; checked: number }> = {}
-  const nextTags: Record<string, { tag: string; lineIndex: number }[]> = {}
+  const nextTags: Record<string, { tag: string; lineIndex: number; tabId: string; priority?: boolean }[]> = {}
   for (const tab of tabs) {
     nextTabCounts[tab.noteId] = (nextTabCounts[tab.noteId] ?? 0) + 1
     nextLineCounts[tab.noteId] = (nextLineCounts[tab.noteId] ?? 0) + countLines(tab.content)
@@ -79,26 +79,15 @@ const computeCounts = (
       nextChecklist[tab.noteId] = stat
     }
   }
-  // Build tag jump list from the first tab in tabOrder (fallback to first seen tab)
-  const firstTabIdByNoteId = new Map<string, string>()
-  for (const note of [...notes.value, ...archivedNotes.value]) {
-    const first = note.tabOrder?.[0]
-    if (first) firstTabIdByNoteId.set(note.id, first)
-  }
   for (const tab of tabs) {
-    const chosen = firstTabIdByNoteId.get(tab.noteId)
-    if (!chosen) {
-      firstTabIdByNoteId.set(tab.noteId, tab.id)
-    }
-  }
-  for (const tab of tabs) {
-    if (firstTabIdByNoteId.get(tab.noteId) !== tab.id) continue
     const tags = parseText(tab.content).tags.map((t) => ({
       tag: t.tag,
       lineIndex: t.lineIndex,
+      tabId: tab.id,
       priority: t.priority ?? false,
     }))
-    nextTags[tab.noteId] = tags.sort((a, b) => Number(b.priority) - Number(a.priority))
+    const list = nextTags[tab.noteId] ?? []
+    nextTags[tab.noteId] = [...list, ...tags].sort((a, b) => Number(b.priority) - Number(a.priority))
   }
   for (const image of images) {
     const current = nextByteSizes[image.noteId] ?? 0
@@ -250,10 +239,10 @@ const filteredArchived = computed(() => archivedNotes.value.filter((n) => matche
             >
               <button
                 v-for="t in firstTabTags[note.id]"
-                :key="t.tag + ':' + t.lineIndex"
+                :key="t.tag + ':' + t.tabId + ':' + t.lineIndex"
                 type="button"
                 class="mr-1 inline-flex shrink-0 px-2 py-1 text-[11px] last:mr-0"
-                @click.stop="openTag(note.id, note.tabOrder?.[0], t.lineIndex)"
+                @click.stop="openTag(note.id, t.tabId, t.lineIndex)"
                 :style="{
                   border: t.priority
                     ? `1px solid ${note.color || 'rgba(246,153,63,0.5)'}`

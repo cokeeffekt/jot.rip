@@ -31,10 +31,13 @@ import {
 const route = useRoute()
 const router = useRouter()
 
+type UITab = Tab & { pinnedAt?: string | null }
+
 const note = ref<Note | null>(null)
-const tabs = ref<Tab[]>([])
+const tabs = ref<UITab[]>([])
 const activeTabId = ref<string | null>(null)
 const content = ref('')
+const titleInputRef = ref<HTMLInputElement | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const selection = ref({ start: 0, end: 0 })
@@ -86,6 +89,27 @@ const toggleExportTab = (tabId: string, checked: boolean) => {
   if (checked) next.add(tabId)
   else next.delete(tabId)
   exportSelectedTabIds.value = Array.from(next)
+}
+
+const tabActionsOpen = ref(false)
+const tabActionsRef = ref<HTMLElement | null>(null)
+const tabActionsTriggerRef = ref<HTMLElement | null>(null)
+const closeTabActions = () => {
+  tabActionsOpen.value = false
+}
+const toggleTabActions = () => {
+  if (isReadOnly.value) return
+  tabActionsOpen.value = !tabActionsOpen.value
+}
+
+const noteActionsOpen = ref(false)
+const noteActionsRef = ref<HTMLElement | null>(null)
+const noteActionsTriggerRef = ref<HTMLElement | null>(null)
+const closeNoteActions = () => {
+  noteActionsOpen.value = false
+}
+const toggleNoteActions = () => {
+  noteActionsOpen.value = !noteActionsOpen.value
 }
 const sessionId =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -254,6 +278,14 @@ const teardownChannel = () => {
   otherSessions.value = []
 }
 
+const focusTitleInput = async () => {
+  await nextTick()
+  const el = titleInputRef.value
+  if (!el) return
+  el.focus()
+  el.select()
+}
+
 const ensureNoteAndTab = async () => {
   const id = route.params.id as string | undefined
 
@@ -269,6 +301,7 @@ const ensureNoteAndTab = async () => {
     activeTabId.value = createdTab.id
     content.value = createdTab.content
     loading.value = false
+    void focusTitleInput()
     return
   }
 
@@ -362,6 +395,13 @@ const persistContent = async (value: string) => {
 
 const handleSelectionChange = (payload: { start: number; end: number }) => {
   selection.value = payload
+  const tabId = activeTabId.value
+  const noteId = note.value?.id
+  if (tabId && noteId) {
+    const key = `jotrip:caret:${noteId}:${tabId}`
+    const data = { start: payload.start, end: payload.end }
+    window.localStorage.setItem(key, JSON.stringify(data))
+  }
 }
 
 const broadcastChange = (updatedAt?: string) => {
@@ -390,11 +430,65 @@ const applyFormat = async (action: 'header' | 'checklist') => {
   await persistContent(result.text)
   await nextTick()
   const el = editorRef.value?.$el as HTMLTextAreaElement | undefined
-  el?.setSelectionRange(result.selectionStart, result.selectionEnd)
+  if (el) {
+    el.focus()
+    el.setSelectionRange(result.selectionStart, result.selectionEnd)
+  }
+  selection.value = { start: result.selectionStart, end: result.selectionEnd }
 }
 
 const handleTabClick = (tabId: string) => {
   void setActiveTab(tabId)
+}
+
+const applyNormalizedTabOrder = async () => {
+  if (!note.value) return
+  const normalizedOrder = normalizeTabOrder(note.value, tabs.value)
+  tabs.value = normalizedOrder
+    .map((tabId) => tabs.value.find((t) => t.id === tabId))
+    .filter((t): t is UITab => Boolean(t))
+  if (normalizedOrder.some((idVal, idx) => idVal !== (note.value!.tabOrder[idx] ?? ''))) {
+    const updated = await updateNote(note.value.id, { tabOrder: normalizedOrder })
+    if (updated) note.value = updated
+    else note.value = { ...note.value, tabOrder: normalizedOrder }
+  } else {
+    note.value = { ...note.value, tabOrder: normalizedOrder }
+  }
+}
+
+const applySavedCaret = async (tabId: string, text: string) => {
+  const noteId = note.value?.id
+  if (!noteId) return
+  let saved: { start: number; end: number } | null = null
+  const key = `jotrip:caret:${noteId}:${tabId}`
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (raw) saved = JSON.parse(raw) as { start: number; end: number }
+  } catch {
+    saved = null
+  }
+  const fallback = text.length
+  const start = saved?.start ?? fallback
+  const end = saved?.end ?? fallback
+  await nextTick()
+  const el = editorRef.value?.$el as HTMLTextAreaElement | undefined
+  if (el) {
+    const clamp = (n: number) => Math.max(0, Math.min(n, text.length))
+    const s = clamp(start)
+    const e = clamp(end)
+    el.focus()
+    el.setSelectionRange(s, e)
+    selection.value = { start: s, end: e }
+  }
+}
+
+const updateTabQueryParam = (tabId: string | null) => {
+  const current = route.query.tab as string | undefined
+  if (tabId && current === tabId) return
+  const nextQuery = { ...route.query }
+  if (tabId) nextQuery.tab = tabId
+  else delete nextQuery.tab
+  router.replace({ name: 'note-editor', params: route.params, query: nextQuery })
 }
 
 const setActiveTab = async (tabId: string) => {
@@ -408,7 +502,11 @@ const setActiveTab = async (tabId: string) => {
     window.localStorage.setItem(getLastTabKey(note.value.id), tabId)
   }
   const nextTab = tabs.value.find((t) => t.id === tabId)
-  if (nextTab) content.value = nextTab.content
+  if (nextTab) {
+    content.value = nextTab.content
+    void applySavedCaret(tabId, nextTab.content)
+  }
+  updateTabQueryParam(tabId)
   void applyCalendarJumpFromRoute()
 }
 
@@ -418,11 +516,14 @@ const addTab = async () => {
   if (activeTab.value) await persistContent(content.value)
   const name = `Tab ${tabs.value.length + 1}`
   const newTab = await createTab({ noteId: note.value.id, name, content: '' })
-  tabs.value = [...tabs.value, newTab]
-  const nextOrder = [...tabOrderIds.value, newTab.id]
-  await updateNote(note.value.id, { tabOrder: nextOrder })
-  activeTabId.value = newTab.id
-  content.value = ''
+  const existingOrder = note.value.tabOrder ?? []
+  const nextOrder = [newTab.id, ...existingOrder]
+  tabs.value = [newTab, ...tabs.value]
+  await setActiveTab(newTab.id)
+  const updated = await updateNote(note.value.id, { tabOrder: nextOrder })
+  if (updated) note.value = updated
+  else note.value = { ...note.value, tabOrder: nextOrder }
+  await applyNormalizedTabOrder()
 }
 
 const renameTab = async (tabId: string) => {
@@ -475,6 +576,15 @@ const moveTab = async (tabId: string, direction: 1 | -1) => {
   await updateNote(note.value.id, { tabOrder: order })
 }
 
+const moveTabToFirst = async (tabId: string) => {
+  if (!tabId) return
+  if (!note.value) return
+  const order = tabOrderIds.value.filter((id) => id !== tabId)
+  order.unshift(tabId)
+  tabs.value = order.map((id) => tabs.value.find((t) => t.id === id)).filter((t): t is Tab => Boolean(t))
+  await updateNote(note.value.id, { tabOrder: order })
+}
+
 const saveTitle = async () => {
   if (!note.value) return
   const nextTitle = (noteTitleDraft.value ?? '').trim() || 'Untitled note'
@@ -517,10 +627,6 @@ const saveColor = async (color: string | null) => {
   noteColorDraft.value = color
   const updated = await updateNote(note.value.id, { color })
   if (updated) note.value = updated
-}
-
-const toggleColorPicker = () => {
-  colorPickerOpen.value = !colorPickerOpen.value
 }
 
 const closeColorPicker = () => {
@@ -634,6 +740,9 @@ const applyLineJumpFromRoute = async () => {
 
   await nextTick()
   scrollToLine(lineIndex)
+  const nextQuery = { ...route.query }
+  delete nextQuery.line
+  router.replace({ name: 'note-editor', params: route.params, query: nextQuery })
 }
 
 const scrollToLine = (lineIndex: number) => {
@@ -942,6 +1051,47 @@ const handleFileInput = () => {
   fileInputRef.value?.click()
 }
 
+const insertTodayDateTag = async () => {
+  if (isReadOnly.value) return
+  const el = editorRef.value?.$el as HTMLTextAreaElement | undefined
+  const today = new Date()
+  const y = today.getFullYear()
+  const m = String(today.getMonth() + 1).padStart(2, '0')
+  const d = String(today.getDate()).padStart(2, '0')
+  const token = `@${y}-${m}-${d} `
+
+  const value = content.value
+  const start = el ? el.selectionStart ?? value.length : value.length
+  const end = el ? el.selectionEnd ?? start : start
+  const nextValue = value.slice(0, start) + token + value.slice(end)
+  const nextCursor = start + token.length
+
+  content.value = nextValue
+  selection.value = { start: nextCursor, end: nextCursor }
+  await persistContent(nextValue)
+  await nextTick()
+  if (el) {
+    el.focus()
+    el.setSelectionRange(nextCursor, nextCursor)
+  }
+}
+
+const insertLineAtTop = async () => {
+  if (isReadOnly.value) return
+  const nextValue = `\n${content.value}`
+  content.value = nextValue
+  await persistContent(nextValue)
+  await nextTick()
+  const el = editorRef.value?.$el as HTMLTextAreaElement | undefined
+  if (el) {
+    el.focus()
+    el.setSelectionRange(0, 0)
+    el.scrollTop = 0
+    scrollTop.value = el.scrollTop
+    viewportHeight.value = el.clientHeight
+  }
+}
+
 const handleOutsideClick = (evt: MouseEvent | TouchEvent) => {
   const target = evt.target as Node
 
@@ -963,6 +1113,20 @@ const handleOutsideClick = (evt: MouseEvent | TouchEvent) => {
     const exportPanel = exportPanelRef.value
     if (exportPanel && exportPanel.contains(target)) return
     exportDialogOpen.value = false
+  }
+
+  if (tabActionsOpen.value) {
+    const panel = tabActionsRef.value
+    const trigger = tabActionsTriggerRef.value
+    if ((panel && panel.contains(target)) || (trigger && trigger.contains(target))) return
+    tabActionsOpen.value = false
+  }
+
+  if (noteActionsOpen.value) {
+    const panel = noteActionsRef.value
+    const trigger = noteActionsTriggerRef.value
+    if ((panel && panel.contains(target)) || (trigger && trigger.contains(target))) return
+    noteActionsOpen.value = false
   }
 }
 
@@ -1120,6 +1284,13 @@ watch(
 )
 
 watch(
+  () => activeTabId.value,
+  (next) => {
+    updateTabQueryParam(next)
+  }
+)
+
+watch(
   () => tabs.value,
   () => {
     if (tabs.value.length && !activeTab.value) {
@@ -1144,37 +1315,82 @@ watch(
     <header class="relative flex shrink-0 items-center gap-2">
       <input
         v-model="noteTitleDraft"
-        class="min-w-0 flex-1 border border-white/10 bg-white/5 px-2 py-1.5 text-xl font-semibold text-white outline-none sm:px-3 sm:py-2"
+        class="min-w-0 flex-1 h-10 border border-white/10 bg-white/5 px-3 text-xl font-semibold text-white outline-none sm:h-11 sm:px-4"
         placeholder="Untitled note"
         @blur="saveTitle"
         @keydown.enter.prevent="saveTitle"
         :disabled="isReadOnly"
+        ref="titleInputRef"
       />
-      <button
-        ref="colorTriggerRef"
-        type="button"
-        class="h-9 w-9 border border-white/15 sm:h-10 sm:w-10"
-        :style="{ backgroundColor: noteColorDraft ?? 'rgba(255,255,255,0.06)' }"
-        @click="toggleColorPicker"
-        :disabled="isReadOnly"
-        aria-label="Pick note color"
-      ></button>
-      <button
-        type="button"
-        class="border border-white/15 px-2 py-1.5 text-xs text-white sm:px-3 sm:py-2"
-        @click="openExportDialog"
-        :disabled="isReadOnly"
-      >
-        Export
-      </button>
-      <button
-        type="button"
-        class="border border-white/15 px-2 py-1.5 text-xs text-white sm:px-3 sm:py-2"
-        @click="togglePin"
-        :disabled="isReadOnly"
-      >
-        <span :class="note?.pinnedAt ? 'text-white' : 'text-white/40 grayscale'">📌</span>
-      </button>
+      <div class="relative">
+        <button
+          ref="noteActionsTriggerRef"
+          type="button"
+          class="h-10 w-10 border border-white/15 text-lg text-white sm:h-11 sm:w-11"
+          @click="toggleNoteActions"
+          :disabled="isReadOnly"
+          aria-label="Note actions"
+        >
+          ⋯
+        </button>
+        <div
+          v-if="noteActionsOpen"
+          ref="noteActionsRef"
+          class="absolute right-0 top-full z-40 mt-2 w-56 border border-white/15 bg-slate-900 p-3 text-sm text-white shadow-2xl"
+        >
+          <p class="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">Note actions</p>
+          <div class="space-y-2">
+            <button
+              type="button"
+              class="w-full border border-white/15 px-3 py-2 text-left text-xs"
+              @click="
+                () => {
+                  togglePin()
+                  closeNoteActions()
+                }
+              "
+              :disabled="isReadOnly"
+            >
+              <span :class="note?.pinnedAt ? 'text-white' : 'text-white/40 grayscale'">📌</span>
+              <span class="ml-2">{{ note?.pinnedAt ? 'Unpin note' : 'Pin note' }}</span>
+            </button>
+            <div>
+              <p class="mb-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">Color</p>
+              <div class="grid grid-cols-8 gap-2">
+                <button
+                  v-for="(c, idx) in noteColors"
+                  :key="idx"
+                  type="button"
+                  class="h-7 w-7 border border-white/15"
+                  :style="{ backgroundColor: c ?? 'rgba(255,255,255,0.06)' }"
+                  :class="(noteColorDraft ?? null) === (c ?? null) ? 'ring-2 ring-white/60' : ''"
+                  @click="
+                    () => {
+                      saveColor(c)
+                      closeColorPicker()
+                      closeNoteActions()
+                    }
+                  "
+                  :aria-label="c ? `Set color ${c}` : 'Set default color'"
+                ></button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="w-full border border-white/15 px-3 py-2 text-left text-xs"
+              @click="
+                () => {
+                  openExportDialog()
+                  closeNoteActions()
+                }
+              "
+              :disabled="isReadOnly"
+            >
+              Export…
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div
         v-if="colorPickerOpen"
@@ -1230,61 +1446,116 @@ watch(
     </header>
 
     <div
-      class="tab-strip relative flex items-center gap-2 overflow-x-auto overflow-y-visible whitespace-nowrap text-white text-sm shrink-0 order-1 sm:order-none no-scrollbar"
+      class="tab-strip relative flex items-center gap-2 overflow-y-visible whitespace-nowrap text-white text-sm shrink-0 order-1 sm:order-none"
     >
-      <div
-        v-for="tabItem in tabs"
-        :key="tabItem.id"
-        class="relative inline-flex"
-      >
-        <div class="pointer-events-none absolute left-0 top-0 bottom-0 w-1 bg-white/10" aria-hidden="true">
-          <div
-            v-if="tabChecklistStats[tabItem.id]?.total"
-            class="absolute bottom-0 left-0 right-0"
-            :style="{
-              height: `${Math.round(
-                ((tabChecklistStats[tabItem.id]?.checked || 0) /
-                  Math.max(1, tabChecklistStats[tabItem.id]?.total || 1)) *
-                  100
-              )}%`,
-              backgroundColor: noteColorDraft ?? 'rgba(52, 211, 153, 0.8)',
-            }"
-          ></div>
-        </div>
-        <button
-          class="px-2 py-1.5 pl-4 border-b border-white/10 sm:px-3 sm:py-2"
-          :style="
-            activeTabId === tabItem.id && noteColorDraft
-              ? { backgroundColor: noteColorDraft, color: '#0b1021' }
-              : undefined
-          "
-          :class="activeTabId === tabItem.id ? 'text-white' : 'bg-transparent text-slate-200'"
-          @click="handleTabClick(tabItem.id)"
-          :disabled="isReadOnly"
+      <div class="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-visible no-scrollbar">
+        <div
+          v-for="tabItem in tabs"
+          :key="tabItem.id"
+          class="relative inline-flex"
         >
-          {{ tabItem.name }}
-        </button>
+          <div class="pointer-events-none absolute left-0 top-0 bottom-0 w-1 bg-white/10" aria-hidden="true">
+            <div
+              v-if="tabChecklistStats[tabItem.id]?.total"
+              class="absolute bottom-0 left-0 right-0"
+              :style="{
+                height: `${Math.round(
+                  ((tabChecklistStats[tabItem.id]?.checked || 0) /
+                    Math.max(1, tabChecklistStats[tabItem.id]?.total || 1)) *
+                    100
+                )}%`,
+                backgroundColor: noteColorDraft ?? 'rgba(52, 211, 153, 0.8)',
+              }"
+            ></div>
+          </div>
+          <button
+            class="px-2 py-1.5 pl-4 border-b border-white/10 sm:px-3 sm:py-2"
+            :style="
+              activeTabId === tabItem.id && noteColorDraft
+                ? { backgroundColor: noteColorDraft, color: '#0b1021' }
+                : undefined
+            "
+            :class="activeTabId === tabItem.id ? 'text-white' : 'bg-transparent text-slate-200'"
+            @click="handleTabClick(tabItem.id)"
+            :disabled="isReadOnly"
+          >
+            <span v-if="tabItem.pinnedAt" class="mr-1" aria-hidden="true">📌</span>
+            {{ tabItem.name }}
+          </button>
+        </div>
       </div>
-      <button class="px-2 py-1.5 text-lg sm:px-3 sm:py-2" type="button" @click="addTab" :disabled="isReadOnly">＋</button>
+      <button class="shrink-0 px-2 py-1.5 text-lg sm:px-3 sm:py-2" type="button" @click="addTab" :disabled="isReadOnly">
+        ＋
+      </button>
     </div>
 
-    <div class="flex flex-wrap items-center border border-white/15 text-white text-sm shrink-0 order-4 sm:order-none">
-      <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="applyFormat('header')" :disabled="isReadOnly">#</button>
-      <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="applyFormat('checklist')" :disabled="isReadOnly">☐</button>
-      <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="handleFileInput" :disabled="isReadOnly">🖼</button>
+    <div class="flex flex-wrap items-center border border-white/15 text-white text-lg sm:text-sm shrink-0 order-4 sm:order-none my-0" style="margin-top: -0.5rem;">
+      <button class="toolbar-btn py-1.5 sm:py-2" type="button" @click="insertLineAtTop" :disabled="isReadOnly">↵</button>
+      <button class="toolbar-btn py-1.5 sm:py-2" type="button" @click="applyFormat('header')" :disabled="isReadOnly">#</button>
+      <button class="toolbar-btn py-1.5 sm:py-2" type="button" @click="applyFormat('checklist')" :disabled="isReadOnly">☐</button>
+      <button class="toolbar-btn py-1.5 sm:py-2" type="button" @click="insertTodayDateTag" :disabled="isReadOnly">@</button>
+      <button class="toolbar-btn py-1.5 sm:py-2" type="button" @click="handleFileInput" :disabled="isReadOnly">🖼</button>
       <span class="self-center text-[11px] text-slate-400" v-if="saving">Saving…</span>
-      <div class="ml-auto flex items-center divide-x divide-white/15">
-        <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="activeTabId && moveTab(activeTabId, -1)" :disabled="isReadOnly">←</button>
-        <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="activeTabId && moveTab(activeTabId, 1)" :disabled="isReadOnly">→</button>
-        <button class="px-2 py-1.5 sm:px-3 sm:py-2" type="button" @click="activeTabId && renameTab(activeTabId)" :disabled="isReadOnly">✎</button>
+      <div class="ml-auto relative">
         <button
-          class="px-2 py-1.5 sm:px-3 sm:py-2 text-red-200"
+          ref="tabActionsTriggerRef"
+          class="toolbar-btn py-1.5 sm:py-2"
           type="button"
-          @click="activeTabId && deleteTabById(activeTabId)"
+          @click="toggleTabActions"
           :disabled="isReadOnly"
+          aria-label="Tab actions"
         >
-          ✕
+          ✎
         </button>
+        <div
+          v-if="tabActionsOpen"
+          ref="tabActionsRef"
+          class="absolute right-0 bottom-full sm:bottom-auto sm:top-full z-40 mb-2 sm:mt-2 w-44 border border-white/15 bg-slate-900 p-2 text-sm text-white shadow-2xl"
+        >
+          <p class="mb-2 px-2 text-[11px] uppercase tracking-[0.2em] text-slate-400">Tab actions</p>
+          <div class="flex flex-col gap-1">
+            <button
+              class="w-full rounded px-3 py-2 text-left hover:bg-white/10 disabled:opacity-60"
+              type="button"
+              @click="activeTabId && moveTab(activeTabId, -1)"
+              :disabled="isReadOnly || !activeTabId"
+            >
+              Move left
+            </button>
+            <button
+              class="w-full rounded px-3 py-2 text-left hover:bg-white/10 disabled:opacity-60"
+              type="button"
+              @click="activeTabId && moveTab(activeTabId, 1)"
+              :disabled="isReadOnly || !activeTabId"
+            >
+              Move right
+            </button>
+            <button
+              class="w-full rounded px-3 py-2 text-left hover:bg-white/10 disabled:opacity-60"
+              type="button"
+              @click="activeTabId && moveTabToFirst(activeTabId); closeTabActions()"
+              :disabled="isReadOnly || !activeTabId"
+            >
+              Move to first
+            </button>
+            <button
+              class="w-full rounded px-3 py-2 text-left hover:bg-white/10 disabled:opacity-60"
+              type="button"
+              @click="activeTabId && renameTab(activeTabId); closeTabActions()"
+              :disabled="isReadOnly || !activeTabId"
+            >
+              Rename tab
+            </button>
+            <button
+              class="w-full rounded px-3 py-2 text-left text-red-200 hover:bg-red-500/15 disabled:opacity-60"
+              type="button"
+              @click="activeTabId && deleteTabById(activeTabId); closeTabActions()"
+              :disabled="isReadOnly || !activeTabId"
+            >
+              Delete tab
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1418,5 +1689,16 @@ watch(
 <style scoped>
 .tab-strip button {
   user-select: none;
+}
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+}
+@media (min-width: 640px) {
+  .toolbar-btn {
+    width: 2.3rem;
+  }
 }
 </style>

@@ -54,8 +54,10 @@ const openNote = (noteId: string, tabId?: string, lineIndex?: number) =>
 const load = async () => {
   loading.value = true
   const [notes, tabs] = await Promise.all([listActiveNotes(), listAllTabs()])
+  const activeNoteIds = new Set(notes.map((n) => n.id))
+  const activeTabs = tabs.filter((t) => activeNoteIds.has(t.noteId))
   const today = todayKey()
-  todayEntries.value = buildCalendarEntriesForRange(notes, tabs, { start: today, end: today })
+  todayEntries.value = buildCalendarEntriesForRange(notes, activeTabs, { start: today, end: today })
 
   pinnedNotes.value = notes
     .filter((n) => Boolean(n.pinnedAt))
@@ -66,14 +68,6 @@ const load = async () => {
     })
     .map((n) => ({ id: n.id, title: n.title || 'Untitled', updatedAt: n.updatedAt, color: n.color ?? null }))
 
-  const firstTabByNote = new Map<string, string>()
-  notes.forEach((n) => {
-    const first = n.tabOrder?.[0]
-    if (first) firstTabByNote.set(n.id, first)
-  })
-  tabs.forEach((t) => {
-    if (!firstTabByNote.has(t.noteId)) firstTabByNote.set(t.noteId, t.id)
-  })
   const tagList: {
     tag: string
     priority?: boolean
@@ -83,8 +77,7 @@ const load = async () => {
     color?: string | null
     lineIndex?: number
   }[] = []
-  for (const tab of tabs) {
-    if (firstTabByNote.get(tab.noteId) !== tab.id) continue
+  for (const tab of activeTabs) {
     const parsed = parseText(tab.content)
     parsed.tags.forEach((t) => {
       tagList.push({
@@ -184,10 +177,6 @@ onMounted(load)
               }"
               @click="openNote(tag.noteId, tag.tabId, tag.lineIndex)"
             >
-              <span
-                class="h-3 w-1 shrink-0"
-                :style="tag.color ? { backgroundColor: tag.color } : { backgroundColor: 'rgba(52,211,153,0.6)' }"
-              ></span>
               <span :class="tag.priority ? 'font-bold' : ''">
                 #{{ tag.tag.length > 20 ? tag.tag.slice(0, 20) + '…' : tag.tag }}
               </span>
