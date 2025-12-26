@@ -1,42 +1,30 @@
-const CACHE_NAME = 'jotrip-cache-v1'
-const OFFLINE_URLS = ['/', '/index.html', '/manifest.webmanifest', '/pwa-icon-192.png', '/pwa-icon-512.png']
+const SW_VERSION = 'v3'
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(OFFLINE_URLS))
-      .then(() => self.skipWaiting())
-  )
+  // Activate immediately on install
+  event.waitUntil(self.skipWaiting())
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
-      )
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   )
 })
 
+// Force navigations to revalidate from network (no runtime caching)
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) {
-    return
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request, { cache: 'reload' }).catch(() => fetch('/index.html', { cache: 'reload' }))
+    )
   }
+})
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached
-
-      return fetch(event.request)
-        .then((response) => {
-          const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-          return response
-        })
-        .catch(() => cached)
-    })
-  )
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
 })

@@ -1,8 +1,8 @@
 <script setup lang="ts"></script>
 
 <template>
-  <section class="flex h-full min-h-0 flex-col gap-6 overflow-hidden">
-    <header class="shrink-0">
+  <section class="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+    <header class="shrink-0 px-2 sm:px-0">
       <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Help</p>
       <h1 class="text-2xl font-semibold text-white">Quick reference</h1>
     </header>

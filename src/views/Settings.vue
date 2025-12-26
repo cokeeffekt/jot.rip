@@ -144,8 +144,6 @@ const hintPasswordManager = () => {
   }
   if (p) {
     p.value = syncCombined.value
-    p.focus()
-    p.blur()
   }
 }
 
@@ -244,7 +242,7 @@ const clearRemoteAndLocal = async () => {
       <h1 class="text-2xl font-semibold text-white">Settings</h1>
     </header>
 
-    <div class="min-h-0 flex-1 overflow-auto px-2 sm:px-0">
+    <div class="min-h-0 flex-1 overflow-auto px-2 pb-16 sm:px-0 sm:pb-6">
       <div class="space-y-3 border border-white/10 bg-slate-900/40 p-3 sm:p-4">
         <div class="flex items-center justify-between border border-white/5 bg-white/5 px-4 py-3">
           <div>
@@ -325,6 +323,7 @@ const clearRemoteAndLocal = async () => {
                 {{ showCombined ? 'Hide' : 'Show' }}
               </button>
             </div>
+          </label>
           <div class="mt-2 flex gap-2">
             <button
               type="button"
@@ -342,12 +341,10 @@ const clearRemoteAndLocal = async () => {
             </button>
           </div>
           <p class="text-xs text-slate-400">We recommend saving this in your browser password manager when prompted.</p>
-        </label>
-        <!-- Hidden auth form to encourage password managers to offer save -->
-        <form class="absolute h-px w-px overflow-hidden" aria-hidden="true">
-          <input ref="hiddenUserRef" name="username" autocomplete="username" />
-          <input ref="hiddenPassRef" name="password" type="password" autocomplete="new-password" />
-        </form>
+          <form class="absolute h-px w-px overflow-hidden" aria-hidden="true">
+            <input ref="hiddenUserRef" name="username" autocomplete="username" />
+            <input ref="hiddenPassRef" name="password" type="password" autocomplete="new-password" />
+          </form>
           <label class="block space-y-1 text-sm text-slate-200">
             <span class="text-xs uppercase tracking-[0.2em] text-slate-400">Server URL</span>
             <input

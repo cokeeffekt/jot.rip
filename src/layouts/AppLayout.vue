@@ -89,6 +89,25 @@ onBeforeUnmount(() => {
     window.removeEventListener('beforeinstallprompt', handleBeforeInstall as any)
   }
 })
+
+const forceUpdate = async () => {
+  closeMenu()
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map((reg) => reg.unregister()))
+    } catch {
+      // ignore
+    }
+    try {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((k) => caches.delete(k)))
+    } catch {
+      // ignore
+    }
+  }
+  window.location.reload()
+}
 </script>
 
 <template>
@@ -248,6 +267,14 @@ onBeforeUnmount(() => {
           >
             <span>Install app</span>
             <span aria-hidden="true">⬇</span>
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center justify-between border px-3 py-2 text-sm font-semibold transition sm:px-4 sm:py-3 border-red-300/50 bg-red-500/15 text-red-100 hover:border-red-200/70"
+            @click="forceUpdate"
+          >
+            <span>Force update</span>
+            <span aria-hidden="true">⟳</span>
           </button>
         </nav>
       </aside>
